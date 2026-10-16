@@ -47,6 +47,7 @@ jobs:
         run: |
           pkg="pc/dist/MigratorDesk"
           cp pc/agent.apk "$pkg/"
+          mkdir -p "$pkg/tools"
           cp -r pc/tools/adb-windows "$pkg/tools/adb-windows"
           mkdir -p "$pkg/docs"
           cp README.md pc/部署到Windows.md "$pkg/docs/"
@@ -59,6 +60,7 @@ jobs:
         run: |
           app="pc/dist/MigratorDesk.app/Contents/MacOS"
           cp pc/agent.apk "$app/"
+          mkdir -p "$app/tools"
           cp -r pc/tools/adb-darwin "$app/tools/adb-darwin"
           mkdir -p "$app/docs"
           cp README.md pc/部署到Windows.md "$app/docs/"

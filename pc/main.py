@@ -8,6 +8,8 @@ Mac 上开发调试，Windows 店机部署（见 部署到Windows.md）。
 import os
 import queue
 import sys
+import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -20,6 +22,15 @@ from migrator.pipeline import (EVT_DONE, EVT_LOG, EVT_PHASE, EVT_PROGRESS,
                                EVT_PROMPT, MigrationWorker, build_report)
 
 APP_TITLE = "换机工作台（店内版）"
+
+
+def _short_path(p, limit=42):
+    """路径过长时缩略显示为 a/…/b。"""
+    p = os.path.normpath(p)
+    if len(p) <= limit:
+        return p
+    head, tail = os.path.split(p)
+    return os.path.join("…", os.path.basename(head), tail)
 
 
 def _default_agent_apk():
@@ -94,11 +105,15 @@ class MainWindow:
             raise
 
         self.worker = None
-        self._last_serials = ()
+        self._closing = False
+        # 所有 adb/usbmuxd 等子进程调用一律在后台线程执行，
+        # 结果经 ui_q 送回主线程渲染——主线程绝不阻塞，窗口不会未响应
+        self.ui_q = queue.Queue()
         self._build_ui()
 
-        self.root.after(500, self._poll_devices)
+        threading.Thread(target=self._device_poller, daemon=True).start()
         self.root.after(120, self._poll_events)
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         ms = os.environ.get("MIGRATOR_AUTOCLOSE_MS")
         if ms and ms.isdigit():  # 冒烟测试用
@@ -137,11 +152,11 @@ class MainWindow:
 
         apk_row = ttk.Frame(opts)
         apk_row.pack(fill="x", pady=(6, 0))
-        ttk.Label(apk_row, text="Agent APK:").pack(side="left")
         self.apk_var = tk.StringVar(value=_default_agent_apk())
-        ttk.Entry(apk_row, textvariable=self.apk_var).pack(
-            side="left", fill="x", expand=True, padx=6)
-        ttk.Button(apk_row, text="浏览…", command=self._pick_apk).pack(side="left")
+        self.agent_status = ttk.Label(apk_row, text="")
+        self.agent_status.pack(side="left")
+        ttk.Button(apk_row, text="更换 Agent APK…",
+                   command=self._pick_apk).pack(side="right")
 
         run = ttk.Frame(self.root, padding=(10, 4))
         run.pack(fill="x")
@@ -170,21 +185,29 @@ class MainWindow:
         self.status = ttk.Label(self.root, text=f"adb: {self.adb.path}",
                                 anchor="w", padding=(10, 2))
         self.status.pack(fill="x")
+        self._refresh_agent_status()
 
     # -- 设备轮询 -----------------------------------------------------------
-    def _poll_devices(self):
-        try:
-            infos = self.adb.list_devices()
-            adb_err = None
-        except AdbError as e:
-            infos, adb_err = [], e
-        # iOS 设备（未装 pymobiledevice3 时自动跳过，不影响安卓迁移）
-        if ios_mod.available():
-            for udid, _t in ios_mod.list_ios_devices():
-                infos.append(DeviceInfo(ios_mod.IOS_PREFIX + udid,
-                                        model="iPhone", product="Apple"))
-        if adb_err:
-            self.status.config(text=f"adb 错误: {adb_err}")
+    # -- 设备轮询（后台线程执行，主线程只渲染结果） -------------------------
+    def _device_poller(self):
+        while not self._closing:
+            err = None
+            try:
+                infos = self.adb.list_devices()
+            except AdbError as e:
+                infos, err = [], str(e)
+            else:
+                # iOS 设备（未装 pymobiledevice3 时自动跳过；usbmux 调用也在线程内）
+                if ios_mod.available():
+                    for udid, _t in ios_mod.list_ios_devices():
+                        infos.append(DeviceInfo(ios_mod.IOS_PREFIX + udid,
+                                                model="iPhone", product="Apple"))
+            self.ui_q.put(("devices", infos, err))
+            time.sleep(2)
+
+    def _apply_devices(self, infos, err):
+        if err:
+            self.status.config(text=f"adb 错误: {err}")
         else:
             ios_n = sum(1 for i in infos if ios_mod.is_ios(i.serial))
             extra = f"，iPhone {ios_n} 台" if ios_n else ""
@@ -197,7 +220,6 @@ class MainWindow:
         self.panel_a.update_devices(infos, prefer_serial=keep_a)
         self.panel_b.update_devices(infos, prefer_serial=keep_b)
         self._refresh_start_state()
-        self.root.after(2000, self._poll_devices)
 
     def _refresh_start_state(self):
         can = (self.worker is None
@@ -215,11 +237,28 @@ class MainWindow:
         self.panel_b.update_devices(infos, prefer_serial=sa)
         self._refresh_start_state()
 
+    def _on_close(self):
+        self._closing = True
+        self.root.destroy()
+
     def _pick_apk(self):
         p = filedialog.askopenfilename(
             title="选择 agent APK", filetypes=[("APK", "*.apk")])
         if p:
             self.apk_var.set(p)
+            self._refresh_agent_status()
+
+    def _refresh_agent_status(self):
+        """agent APK 默认随程序内置（exe 同级或包内），只在缺失时才需要手动指定。"""
+        p = self.apk_var.get()
+        if p and os.path.isfile(p):
+            size = os.path.getsize(p) / 1024
+            self.agent_status.config(
+                text=f"Agent APK：已内置（{_short_path(p)}，{size:.0f} KB）")
+        else:
+            self.agent_status.config(
+                text="Agent APK：未找到——通讯录/短信/通话记录将不可用，"
+                     f"点右侧指定（找不到：{_short_path(p)}）")
 
     # -- 迁移控制 -----------------------------------------------------------
     def _start(self):
@@ -298,27 +337,51 @@ class MainWindow:
                 f"目标设备：{', '.join(serials)}\n\n继续？"):
             return
         self.log_line("===== 清理客户手机 =====")
-        for s in serials:
-            out = self.adb.run(["-s", s, "uninstall", AGENT_PKG],
-                               timeout=60, ok_fail=True)
-            self.log_line(f"[{s}] 卸载 agent：{'成功' if 'Success' in out else '无或失败'}")
-        # adb_enabled=0 会断开 adb 自身，必须放在最后且忽略失败
-        for s in serials:
-            self.adb.run(["-s", s, "shell", "settings put global adb_enabled 0"],
-                         timeout=15, ok_fail=True)
-            self.log_line(f"[{s}] 已请求关闭 USB 调试")
         self.cleanup_btn.config(state="disabled")
+        self.phase_var.set("清理中 …")
+
+        def work():
+            for s in serials:
+                out = self.adb.run(["-s", s, "uninstall", AGENT_PKG],
+                                   timeout=60, ok_fail=True)
+                self.ui_q.put(("log", f"[{s}] 卸载 agent："
+                                      f"{'成功' if 'Success' in out else '无或失败'}"))
+            # adb_enabled=0 会断开 adb 自身，必须放最后且忽略失败
+            for s in serials:
+                self.adb.run(["-s", s, "shell",
+                              "settings put global adb_enabled 0"],
+                             timeout=15, ok_fail=True)
+                self.ui_q.put(("log", f"[{s}] 已请求关闭 USB 调试"))
+            self.ui_q.put(("cleanup_done", None))
+
+        threading.Thread(target=work, daemon=True).start()
 
     # -- 事件处理 -----------------------------------------------------------
     def _poll_events(self):
-        drained = True
-        while drained:
-            try:
-                kind, value = self.worker.q.get_nowait()
-            except (queue.Empty, AttributeError):
-                drained = False
-            else:
-                self._handle_event(kind, value)
+        # 1) 界面事件队列（设备轮询 / 清理线程的结果）
+        try:
+            while True:
+                item = self.ui_q.get_nowait()
+                kind = item[0]
+                if kind == "devices":
+                    self._apply_devices(item[1], item[2])
+                elif kind == "log":
+                    self.log_line(item[1])
+                elif kind == "cleanup_done":
+                    self.cleanup_btn.config(state="normal")
+                    self.phase_var.set("清理完成")
+        except queue.Empty:
+            pass
+        # 2) 迁移 worker 的事件
+        if self.worker:
+            drained = True
+            while drained:
+                try:
+                    kind, value = self.worker.q.get_nowait()
+                except queue.Empty:
+                    drained = False
+                else:
+                    self._handle_event(kind, value)
         self.root.after(120, self._poll_events)
 
     def _handle_event(self, kind, value):

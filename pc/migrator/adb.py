@@ -6,6 +6,10 @@ import sys
 
 from . import __version__  # noqa: F401
 
+# Windows 下隐藏子进程控制台（windowed 打包必备，避免每次 adb 调用闪黑框）
+# POSIX 上必须为 0（非 0 会直接抛异常）
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
 
 class AdbError(RuntimeError):
     pass
@@ -64,7 +68,8 @@ class Adb:
     def run(self, args, timeout=30, ok_fail=False):
         """执行 adb 命令，返回 stdout 文本。"""
         try:
-            p = subprocess.run([self.path, *args], capture_output=True, timeout=timeout)
+            p = subprocess.run([self.path, *args], capture_output=True,
+                               timeout=timeout, creationflags=_NO_WINDOW)
         except subprocess.TimeoutExpired:
             if ok_fail:
                 return ""
@@ -77,7 +82,8 @@ class Adb:
     def run_bytes(self, args, timeout=60, ok_fail=False):
         """执行 adb 命令，返回原始 stdout 字节（用于二进制载荷，如 exec-out cat）。"""
         try:
-            p = subprocess.run([self.path, *args], capture_output=True, timeout=timeout)
+            p = subprocess.run([self.path, *args], capture_output=True,
+                               timeout=timeout, creationflags=_NO_WINDOW)
         except subprocess.TimeoutExpired:
             if ok_fail:
                 return b""
@@ -91,6 +97,7 @@ class Adb:
         return self.run(["-s", serial, "shell", cmd], **kw)
 
     def popen(self, serial, args, **kw):
+        kw.setdefault("creationflags", _NO_WINDOW)
         return subprocess.Popen([self.path, "-s", serial, *args], **kw)
 
     def list_devices(self):

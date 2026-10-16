@@ -22,21 +22,19 @@ from migrator.pipeline import (EVT_DONE, EVT_LOG, EVT_PHASE, EVT_PROGRESS,
 APP_TITLE = "换机工作台（店内版）"
 
 
-def _app_dir():
-    """打包（PyInstaller）后取 exe/app 所在目录；源码运行取 pc/ 目录。"""
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(os.path.abspath(sys.executable))
-    return os.path.dirname(os.path.abspath(__file__))
-
-
 def _default_agent_apk():
-    pc_dir = _app_dir()
-    root = os.path.dirname(pc_dir)
-    cands = [
-        os.path.join(pc_dir, "agent.apk"),
-        os.path.join(root, "agent-android", "app", "build", "outputs",
-                     "apk", "debug", "app-debug.apk"),
-    ]
+    cands = []
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        cands.append(os.path.join(exe_dir, "agent.apk"))       # 解压版
+        cands.append(os.path.join(getattr(sys, "_MEIPASS", exe_dir),
+                                  "agent.apk"))                 # 单文件版
+    else:
+        pc_dir = os.path.dirname(os.path.abspath(__file__))
+        cands.append(os.path.join(pc_dir, "agent.apk"))
+        cands.append(os.path.join(os.path.dirname(pc_dir), "agent-android",
+                                  "app", "build", "outputs", "apk", "debug",
+                                  "app-debug.apk"))
     for c in cands:
         if os.path.isfile(c):
             return c

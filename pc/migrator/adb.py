@@ -33,24 +33,29 @@ class Adb:
     @staticmethod
     def _find():
         if getattr(sys, "frozen", False):
-            # PyInstaller 打包后：adb 与 agent 同级放在 exe/app 目录下
+            # PyInstaller 打包后：优先 exe 同级目录（解压版，可手动替换 adb），
+            # 其次包内资源（onefile 单文件版，启动时自解压到 _MEIPASS）
             base = os.path.dirname(os.path.abspath(sys.executable))
+            inner = getattr(sys, "_MEIPASS", base)
+            cands = [os.path.join(base, "tools"), os.path.join(inner, "tools")]
         else:
             base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        cands = []
-        if sys.platform == "win32":
-            cands += [
-                os.path.join(base, "tools", "adb-windows", "adb.exe"),
-                os.path.join(base, "tools", "adb", "adb.exe"),
-            ]
-        else:
-            cands += [
-                os.path.join(base, "tools", "adb-darwin", "adb"),
-                os.path.join(base, "tools", "adb", "adb"),
-            ]
-        cands.append(os.environ.get("MIGRATOR_ADB"))
-        cands.append(shutil.which("adb"))
-        for c in cands:
+            cands = [os.path.join(base, "tools")]
+        found = []
+        for tools_dir in cands:
+            if sys.platform == "win32":
+                found += [
+                    os.path.join(tools_dir, "adb-windows", "adb.exe"),
+                    os.path.join(tools_dir, "adb", "adb.exe"),
+                ]
+            else:
+                found += [
+                    os.path.join(tools_dir, "adb-darwin", "adb"),
+                    os.path.join(tools_dir, "adb", "adb"),
+                ]
+        found.append(os.environ.get("MIGRATOR_ADB"))
+        found.append(shutil.which("adb"))
+        for c in found:
             if c and os.path.isfile(c) and os.access(c, os.X_OK):
                 return c
         raise AdbError("找不到 adb。请把 platform-tools 解压到 pc/tools/ 下，"

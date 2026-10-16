@@ -69,21 +69,37 @@ jobs:
           cd pc/dist
           zip -qry "../../migrator-${{ matrix.platform }}.zip" MigratorDesk.app 使用说明.txt
 
+      - name: Build standalone exe (onefile)
+        if: runner.os == 'Windows'
+        working-directory: pc
+        shell: bash
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed \
+            --name MigratorDesk-standalone \
+            --add-data "agent.apk;." \
+            --add-data "tools/adb-windows;tools/adb-windows" \
+            main.py
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: migrator-${{ matrix.platform }}
-          path: migrator-${{ matrix.platform }}.zip
+          path: |
+            migrator-${{ matrix.platform }}.zip
+            pc/dist/MigratorDesk-standalone.exe
 
       - name: Create release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: migrator-${{ matrix.platform }}.zip
+          files: |
+            migrator-${{ matrix.platform }}.zip
+            pc/dist/MigratorDesk-standalone.exe
           body: |
             换机工作台（店内版）
 
-            - **migrator-windows-x64.zip**：解压后双击 MigratorDesk.exe
+            - **migrator-windows-x64.zip**：解压后双击 MigratorDesk.exe（agent.apk 可手动替换升级）
+            - **MigratorDesk-standalone.exe**：Windows 单文件版，下载即双击运行（adb 与 agent 已打进 exe，启动慢几秒属正常）
             - **migrator-macos-arm64.zip**：解压后右键 MigratorDesk.app → 打开（首次需绕过 Gatekeeper：右键打开，或 `xattr -d com.apple.quarantine MigratorDesk.app`）
 
             两个包均已内置 adb 与 agent.apk（会自动安装到手机）。

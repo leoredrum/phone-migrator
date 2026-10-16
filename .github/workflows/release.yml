@@ -50,8 +50,9 @@ jobs:
           mkdir -p "$pkg/tools"
           cp -r pc/tools/adb-windows "$pkg/tools/adb-windows"
           mkdir -p "$pkg/docs"
-          cp README.md pc/部署到Windows.md "$pkg/docs/"
-          printf '解压后双击 MigratorDesk.exe 运行。\n首次使用请阅读 docs/ 内的说明（各品牌USB驱动、MIUI开关）。\n' > "$pkg/使用说明.txt"
+          cp README.md "$pkg/docs/README.md"
+          cp pc/部署到Windows.md "$pkg/docs/deploy-windows.md"
+          printf '解压后双击 MigratorDesk.exe 运行。\n首次使用请阅读 docs/ 内的说明（各品牌USB驱动、MIUI开关）。\n' > "$pkg/readme.txt"
           cd pc/dist
           powershell Compress-Archive -Path MigratorDesk -DestinationPath "../../migrator-${{ matrix.platform }}.zip" -Force
 

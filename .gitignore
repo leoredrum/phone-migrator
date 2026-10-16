@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+.venv*/
+dist/
+
+# Android
+.gradle/
+agent-android/**/build/
+agent-android/local.properties
+
+# 系统
+.DS_Store

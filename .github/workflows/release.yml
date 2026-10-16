@@ -1,0 +1,88 @@
+name: build-release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows-x64
+          - os: macos-latest
+            platform: macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pyinstaller
+        run: pip install pyinstaller
+
+      - name: Get macOS platform-tools
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          curl -sL -o pt.zip https://dl.google.com/android/repository/platform-tools-latest-darwin.zip
+          unzip -q pt.zip
+          mkdir -p pc/tools/adb-darwin
+          mv platform-tools/* pc/tools/adb-darwin/
+
+      - name: Build with pyinstaller
+        working-directory: pc
+        run: pyinstaller --noconfirm --clean --windowed --name MigratorDesk main.py
+
+      - name: Assemble package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          pkg="pc/dist/MigratorDesk"
+          cp pc/agent.apk "$pkg/"
+          cp -r pc/tools/adb-windows "$pkg/tools/adb-windows"
+          mkdir -p "$pkg/docs"
+          cp README.md pc/部署到Windows.md "$pkg/docs/"
+          printf '解压后双击 MigratorDesk.exe 运行。\n首次使用请阅读 docs/ 内的说明（各品牌USB驱动、MIUI开关）。\n' > "$pkg/使用说明.txt"
+          cd pc/dist
+          powershell Compress-Archive -Path MigratorDesk -DestinationPath "../../migrator-${{ matrix.platform }}.zip" -Force
+
+      - name: Assemble package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          app="pc/dist/MigratorDesk.app/Contents/MacOS"
+          cp pc/agent.apk "$app/"
+          cp -r pc/tools/adb-darwin "$app/tools/adb-darwin"
+          mkdir -p "$app/docs"
+          cp README.md pc/部署到Windows.md "$app/docs/"
+          printf '右键 MigratorDesk.app → 打开（首次绕过 Gatekeeper）。\nadb 已内置；iOS 功能需自建 venv 安装 pymobiledevice3。\n' > "pc/dist/使用说明.txt"
+          cd pc/dist
+          zip -qry "../../migrator-${{ matrix.platform }}.zip" MigratorDesk.app 使用说明.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: migrator-${{ matrix.platform }}
+          path: migrator-${{ matrix.platform }}.zip
+
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: migrator-${{ matrix.platform }}.zip
+          body: |
+            换机工作台（店内版）
+
+            - **migrator-windows-x64.zip**：解压后双击 MigratorDesk.exe
+            - **migrator-macos-arm64.zip**：解压后右键 MigratorDesk.app → 打开（首次需绕过 Gatekeeper：右键打开，或 `xattr -d com.apple.quarantine MigratorDesk.app`）
+
+            两个包均已内置 adb 与 agent.apk（会自动安装到手机）。
+            iOS 功能（iPhone ↔ 安卓）需额外安装 pymobiledevice3，见仓库 docs。
+            未经签名，SmartScreen/Gatekeeper 首次运行会拦一次，选“仍要运行/打开”。

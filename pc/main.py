@@ -33,6 +33,27 @@ def _short_path(p, limit=42):
     return os.path.join("…", os.path.basename(head), tail)
 
 
+def _load_window_icon(root):
+    """tkinter 窗口图标（exe/app 图标由 PyInstaller --icon 负责）。"""
+    cands = []
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        cands += [os.path.join(exe_dir, "assets", "icon.png"),
+                  os.path.join(getattr(sys, "_MEIPASS", exe_dir),
+                               "assets", "icon.png")]
+    else:
+        cands.append(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "assets", "icon.png"))
+    for c in cands:
+        if os.path.isfile(c):
+            try:
+                root._icon_img = tk.PhotoImage(file=c)
+                root.iconphoto(True, root._icon_img)
+            except Exception:
+                pass
+            break
+
+
 def _default_agent_apk():
     cands = []
     if getattr(sys, "frozen", False):
@@ -434,6 +455,7 @@ class MainWindow:
 
 def main():
     root = tk.Tk()
+    _load_window_icon(root)
     try:
         MainWindow(root)
     except AdbError:

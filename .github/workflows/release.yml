@@ -39,7 +39,12 @@ jobs:
 
       - name: Build with pyinstaller
         working-directory: pc
-        run: pyinstaller --noconfirm --clean --windowed --name MigratorDesk main.py
+        shell: bash
+        run: |
+          SEP=":"; ICON="assets/icon.icns"
+          if [ "$RUNNER_OS" = "Windows" ]; then SEP=";"; ICON="assets/icon.ico"; fi
+          pyinstaller --noconfirm --clean --windowed --name MigratorDesk \
+            --icon "$ICON" --add-data "assets/icon.png${SEP}assets" main.py
 
       - name: Assemble package (Windows)
         if: runner.os == 'Windows'
@@ -76,7 +81,9 @@ jobs:
         run: |
           pyinstaller --noconfirm --clean --onefile --windowed \
             --name MigratorDesk-standalone \
+            --icon assets/icon.ico \
             --add-data "agent.apk;." \
+            --add-data "assets/icon.png;assets" \
             --add-data "tools/adb-windows;tools/adb-windows" \
             main.py
 

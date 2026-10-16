@@ -128,7 +128,7 @@ class MainWindow:
             "apps": tk.BooleanVar(value=False),
         }
         rows = [
-            ("photos", "照片与视频（DCIM / Pictures / Movies 直传，不落盘）"),
+            ("photos", "照片与视频（DCIM / Pictures / Movies，本地缓存中转、结束即删）"),
             ("contacts", "通讯录（自动去重）"),
             ("calls", "通话记录"),
             ("sms", "短信（写入时需在新机屏幕上确认一次）"),
@@ -353,16 +353,16 @@ class MainWindow:
             messagebox.showinfo("迁移报告", build_report(stats, ok, msg))
 
     def _set_progress(self, done, total):
+        """只更新进度条；阶段文字由 worker 的 EVT_PHASE 驱动。"""
         if total:
-            self.bar.config(mode="determinate", maximum=total,
-                            value=min(done, total))
-            self.phase_var.set(
-                f"照片视频：{done / 1048576:.0f} / {total / 1048576:.0f} MB")
+            if str(self.bar.cget("mode")) != "determinate":
+                self.bar.stop()
+                self.bar.config(mode="determinate")
+            self.bar.config(maximum=total, value=min(done, total))
         else:
             if str(self.bar.cget("mode")) != "indeterminate":
                 self.bar.config(mode="indeterminate")
                 self.bar.start(40)
-            self.phase_var.set(f"照片视频：已传 {done / 1048576:.0f} MB …")
 
     def log_line(self, line):
         self.log_text.config(state="normal")

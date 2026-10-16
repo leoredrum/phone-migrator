@@ -170,17 +170,26 @@ class MigrationWorker(threading.Thread):
             self.log("源机没有 DCIM/Pictures/Movies 目录，跳过照片视频")
             return {"mb": 0, "dirs": []}
 
-        last = [0]
+        last = [0, 0]
 
-        def on_progress(done, total):
-            if done - last[0] >= _PROGRESS_EMIT_STEP or (total and done >= total):
-                last[0] = done
-                self.emit(EVT_PROGRESS, ("photos", done, total))
+        def on_progress(phase, done, total):
+            # 每个阶段各自按 4MB 节流
+            if done - last[phase - 1] < _PROGRESS_EMIT_STEP and \
+                    not (total and done >= total):
+                return
+            last[phase - 1] = done
+            self.emit(EVT_PROGRESS, ("photos", done, total))
+            label = "照片视频 · " + ("读取旧机" if phase == 1 else "写入新机")
+            if total:
+                label += f"：{done / 1048576:.0f} / {total / 1048576:.0f} MB"
+            else:
+                label += f"：{done / 1048576:.0f} MB"
+            self.emit(EVT_PHASE, label)
 
         self.emit(EVT_PROGRESS, ("photos", 0, 0))
         n = photos.transfer(self.adb, self.src, self.dst, dirs,
-                            on_progress, self._cancel.is_set)
-        self.log(f"照片视频直传完成：{n / 1048576:.1f} MB")
+                            on_progress, self._cancel.is_set, self.log)
+        self.log(f"照片视频传输完成：{n / 1048576:.1f} MB，本地缓存已删除")
         self._media_scan(dirs)
         return {"mb": round(n / 1048576, 1), "dirs": dirs}
 
